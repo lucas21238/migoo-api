@@ -79,8 +79,14 @@ app.post("/chat", async (req, res) => {
       input,
       max_output_tokens: classifierOutput.outputTokenLimit
     });
-
-    const reply = extractTextFromResponse(response) || "No response.";
+    
+console.log("RAW RESPONSE:", JSON.stringify(response, null, 2));
+    
+    const reply =
+  response?.output_text?.trim?.() ||
+  response?.output?.[0]?.content?.[0]?.text?.trim?.() ||
+  response?.output?.[0]?.content?.[0]?.output_text?.trim?.() ||
+  "No response.";
 
     updateMemoryAfterResponse({
       userId,
