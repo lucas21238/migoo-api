@@ -77,7 +77,7 @@ app.post("/chat", async (req, res) => {
       model: "gpt-5-mini",
       instructions,
       input,
-      max_output_tokens: Math.max(200, classifierOutput.outputTokenLimit)
+      max_output_tokens: Math.max(1500, classifierOutput.outputTokenLimit)
     }); 
     
 console.log("RAW RESPONSE:", JSON.stringify(response, null, 2));
