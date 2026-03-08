@@ -70,10 +70,12 @@ app.post("/chat", async (req, res) => {
       classifierOutput
     });
 
-    const input = convertMessagesToResponsesInput(messages);
+    const instructions = buildInstructions(messages);
+    const input = buildResponsesInput(messages);
 
     const response = await openai.responses.create({
       model: "gpt-5-mini",
+      instructions,
       input,
       max_output_tokens: classifierOutput.outputTokenLimit
     });
@@ -113,10 +115,19 @@ app.post("/chat", async (req, res) => {
   }
 });
 
-function convertMessagesToResponsesInput(messages) {
+function buildInstructions(messages) {
+  const systemTexts = messages
+    .filter((msg) => msg && msg.role === "system")
+    .map((msg) => String(msg.content || "").trim())
+    .filter(Boolean);
+
+  return systemTexts.join("\n\n");
+}
+
+function buildResponsesInput(messages) {
   return messages
     .filter((msg) => msg && typeof msg === "object")
-    .filter((msg) => ["system", "user", "assistant"].includes(msg.role))
+    .filter((msg) => msg.role === "user" || msg.role === "assistant")
     .map((msg) => ({
       role: msg.role,
       content: [
@@ -130,30 +141,27 @@ function convertMessagesToResponsesInput(messages) {
 }
 
 function extractTextFromResponse(response) {
-  if (response?.output_text) {
+  if (typeof response?.output_text === "string" && response.output_text.trim()) {
     return response.output_text.trim();
   }
 
   const output = Array.isArray(response?.output) ? response.output : [];
 
-  const texts = [];
+  const parts = [];
 
   for (const item of output) {
     if (item?.type !== "message") continue;
 
-    const contents = Array.isArray(item?.content) ? item.content : [];
+    const content = Array.isArray(item?.content) ? item.content : [];
 
-    for (const contentItem of contents) {
-      if (
-        contentItem?.type === "output_text" &&
-        typeof contentItem?.text === "string"
-      ) {
-        texts.push(contentItem.text);
+    for (const piece of content) {
+      if (piece?.type === "output_text" && typeof piece?.text === "string") {
+        parts.push(piece.text);
       }
     }
   }
 
-  return texts.join("\n").trim();
+  return parts.join("\n").trim();
 }
 
 const port = process.env.PORT || 3000;
