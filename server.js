@@ -2,6 +2,16 @@ import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
 
+import { characters, buildCharacterRuntime } from "./src/config/characters.js";
+import { GLOBAL_SYSTEM } from "./src/config/system.js";
+import { classifyMessage } from "./src/core/classifier.js";
+import {
+  getMemoryState,
+  updateMemoryAfterResponse
+} from "./src/core/memory.js";
+import { buildUserContext } from "./src/core/contextBuilder.js";
+import { buildMessages } from "./src/core/promptBuilder.js";
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -10,39 +20,89 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-const PERSONAS = {
-  nana: "You are Nana, a warm and practical chef mentor. Help with cooking in a friendly way.",
-  jason: "You are Jason, a motivating gym coach. Give safe, realistic advice.",
-  cupid: "You are Cupid, a playful and empathetic love advisor."
-};
-
-app.post("/chat", async (req, res) => {
-  try {
-    const { persona = "nana", message = "", history = [] } = req.body;
-
-    const systemPrompt = PERSONAS[persona] || PERSONAS.nana;
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...history,
-        { role: "user", content: message }
-      ]
-    });
-
-    res.json({
-      reply: completion.choices[0].message.content
-    });
-
-  } catch (err) {
-    res.status(500).json({ error: "server error" });
-  }
-});
-
 app.get("/", (req, res) => {
   res.send("Migoo API running");
 });
 
+app.post("/chat", async (req, res) => {
+  try {
+    const {
+      userId = "guest",
+      persona = "nana",
+      message = "",
+      history = [],
+      hasImage = false
+    } = req.body;
+
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({ error: "message is required" });
+    }
+
+    const character = characters[persona] || characters.nana;
+
+    const classifierOutput = classifyMessage({
+      character,
+      userMessage: message,
+      hasImage,
+      history
+    });
+
+    const memoryState = getMemoryState({
+      userId,
+      characterId: character.id
+    });
+
+    const userContext = buildUserContext({
+      userId,
+      character,
+      memoryState,
+      message
+    });
+
+    const characterRuntime = buildCharacterRuntime(character);
+
+    const messages = buildMessages({
+      globalSystem: GLOBAL_SYSTEM,
+      characterRuntime,
+      userContext,
+      history,
+      userMessage: message,
+      classifierOutput
+    });
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      messages,
+      max_tokens: classifierOutput.outputTokenLimit
+    });
+
+    const reply = completion.choices?.[0]?.message?.content || "No response.";
+
+    updateMemoryAfterResponse({
+      userId,
+      characterId: character.id,
+      userMessage: message,
+      assistantMessage: reply,
+      classifierOutput
+    });
+
+    res.json({
+      reply,
+      meta: {
+        persona: character.id,
+        interactionMode: classifierOutput.interactionMode,
+        responseDepth: classifierOutput.responseDepth,
+        domainStatus: classifierOutput.domainStatus,
+        redirectCharacter: classifierOutput.redirectCharacter
+      }
+    });
+  } catch (err) {
+    console.error("CHAT ERROR:", err);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log("Server running on", port));
+app.listen(port, () => {
+  console.log("Server running on", port);
+});
