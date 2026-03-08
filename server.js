@@ -70,13 +70,15 @@ app.post("/chat", async (req, res) => {
       classifierOutput
     });
 
-    const completion = await openai.chat.completions.create({
+    const input = convertMessagesToResponsesInput(messages);
+
+    const response = await openai.responses.create({
       model: "gpt-5-mini",
-      messages,
-      max_tokens: classifierOutput.outputTokenLimit
+      input,
+      max_output_tokens: classifierOutput.outputTokenLimit
     });
 
-    const reply = completion.choices?.[0]?.message?.content || "No response.";
+    const reply = extractTextFromResponse(response) || "No response.";
 
     updateMemoryAfterResponse({
       userId,
@@ -98,9 +100,61 @@ app.post("/chat", async (req, res) => {
     });
   } catch (err) {
     console.error("CHAT ERROR:", err);
-    res.status(500).json({ error: "server error" });
+
+    const apiMessage =
+      err?.message ||
+      err?.error?.message ||
+      "server error";
+
+    res.status(500).json({
+      error: "server error",
+      details: apiMessage
+    });
   }
 });
+
+function convertMessagesToResponsesInput(messages) {
+  return messages
+    .filter((msg) => msg && typeof msg === "object")
+    .filter((msg) => ["system", "user", "assistant"].includes(msg.role))
+    .map((msg) => ({
+      role: msg.role,
+      content: [
+        {
+          type: "input_text",
+          text: String(msg.content || "").trim()
+        }
+      ]
+    }))
+    .filter((msg) => msg.content[0].text.length > 0);
+}
+
+function extractTextFromResponse(response) {
+  if (response?.output_text) {
+    return response.output_text.trim();
+  }
+
+  const output = Array.isArray(response?.output) ? response.output : [];
+
+  const texts = [];
+
+  for (const item of output) {
+    if (item?.type !== "message") continue;
+
+    const contents = Array.isArray(item?.content) ? item.content : [];
+
+    for (const contentItem of contents) {
+      if (
+        contentItem?.type === "output_text" &&
+        typeof contentItem?.text === "string"
+      ) {
+        texts.push(contentItem.text);
+      }
+    }
+  }
+
+  return texts.join("\n").trim();
+}
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
