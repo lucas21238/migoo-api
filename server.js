@@ -78,7 +78,7 @@ app.post("/chat", async (req, res) => {
       instructions,
       input,
       max_output_tokens: Math.max(200, classifierOutput.outputTokenLimit)
-    });
+    }); 
     
 console.log("RAW RESPONSE:", JSON.stringify(response, null, 2));
     
