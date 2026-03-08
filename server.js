@@ -71,7 +71,7 @@ app.post("/chat", async (req, res) => {
     });
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
+      model: "gpt-5-mini",
       messages,
       max_tokens: classifierOutput.outputTokenLimit
     });
