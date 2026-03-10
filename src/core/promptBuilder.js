@@ -1,3 +1,5 @@
+import { CORE_DIALOGUE_RULES, getDialoguePattern } from "../config/dialoguePatterns.js";
+
 export function buildMessages({
   globalSystem,
   characterRuntime,
@@ -13,19 +15,17 @@ export function buildMessages({
     : [];
 
   const classifierStateBlock = buildClassifierStateBlock(classifierOutput);
+  const dialoguePattern = getDialoguePattern(classifierOutput?.pattern);
 
   return [
     {
       role: "system",
-      content: globalSystem
-    },
-    {
-      role: "system",
-      content: characterRuntime
-    },
-    {
-      role: "system",
-      content: classifierStateBlock
+      content: buildSystemBlock({
+        globalSystem,
+        dialoguePattern,
+        characterRuntime,
+        classifierStateBlock
+      })
     },
     {
       role: "system",
@@ -39,9 +39,31 @@ export function buildMessages({
   ];
 }
 
+function buildSystemBlock({
+  globalSystem,
+  dialoguePattern,
+  characterRuntime,
+  classifierStateBlock
+}) {
+  return `
+${String(globalSystem || "").trim()}
+
+${String(CORE_DIALOGUE_RULES || "").trim()}
+
+DIALOGUE PATTERN
+${String(dialoguePattern?.structure || "").trim()}
+
+CHARACTER RUNTIME
+${String(characterRuntime || "").trim()}
+
+${String(classifierStateBlock || "").trim()}
+`.trim();
+}
+
 function buildClassifierStateBlock(classifierOutput = {}) {
   return `CLASSIFIER_STATE:
 interaction_mode: ${classifierOutput.interactionMode || "live_assistant"}
+pattern: ${classifierOutput.pattern || "brief_explanation"}
 response_depth: ${classifierOutput.responseDepth || "medium"}
 input_compression: ${classifierOutput.inputCompression || "low"}
 domain_status: ${classifierOutput.domainStatus || "in_domain"}
