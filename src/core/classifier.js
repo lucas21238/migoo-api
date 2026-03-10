@@ -13,12 +13,16 @@ const CHARACTER_REDIRECT_MAP = {
 };
 
 function normalizeText(text) {
-  return String(text || "").trim().toLowerCase();
+  return String(text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 function getMessageLengthBucket(messageLength) {
-  if (messageLength <= 40) return "very_short";
-  if (messageLength <= 120) return "short";
+  if (messageLength <= 20) return "ultra_short";
+  if (messageLength <= 60) return "very_short";
+  if (messageLength <= 140) return "short";
   if (messageLength <= 320) return "medium";
   if (messageLength <= 700) return "long";
   return "very_long";
@@ -26,8 +30,9 @@ function getMessageLengthBucket(messageLength) {
 
 function countKeywordHits(text, keywords = []) {
   if (!Array.isArray(keywords) || keywords.length === 0) return 0;
+
   return keywords.reduce((acc, keyword) => {
-    return text.includes(String(keyword).toLowerCase()) ? acc + 1 : acc;
+    return text.includes(normalizeText(keyword)) ? acc + 1 : acc;
   }, 0);
 }
 
@@ -42,148 +47,302 @@ function inferImageMode(characterId) {
   return map[characterId] || "scene_description";
 }
 
-function inferInteractionMode({
+function isGreeting(text) {
+  const greetings = [
+    "oi",
+    "opa",
+    "olá",
+    "ola",
+    "bom dia",
+    "boa tarde",
+    "boa noite",
+    "e aí",
+    "e ai",
+    "fala",
+    "hey",
+    "hi",
+    "hello"
+  ];
+
+  return greetings.some(
+    (greeting) => text === greeting || text.startsWith(`${greeting} `)
+  );
+}
+
+function isShortReaction(text) {
+  const reactions = [
+    "valeu",
+    "obrigado",
+    "obrigada",
+    "show",
+    "boa",
+    "entendi",
+    "saquei",
+    "blz",
+    "beleza",
+    "perfeito",
+    "fechou",
+    "kkk",
+    "haha",
+    "hm"
+  ];
+
+  return reactions.includes(text);
+}
+
+function detectPatternSignals(text) {
+  const patterns = {
+    practical_guidance: [
+      "como fazer",
+      "como eu faço",
+      "como preparar",
+      "como montar",
+      "como organizar",
+      "como arrumar",
+      "me ajuda a fazer",
+      "passo a passo",
+      "step by step"
+    ],
+    reassurance: [
+      "isso faz sentido",
+      "isso está certo",
+      "isso tá certo",
+      "isso parece certo",
+      "isso é muito",
+      "isso tá muito",
+      "está exagerado",
+      "ta exagerado",
+      "tá exagerado",
+      "é plausível",
+      "é normal",
+      "ta normal",
+      "tá normal"
+    ],
+    opinion: [
+      "o que você acha",
+      "o que vc acha",
+      "na sua opinião",
+      "qual sua opinião",
+      "vale a pena",
+      "devo",
+      "compensa"
+    ],
+    brief_explanation: [
+      "me explica",
+      "explica",
+      "explique",
+      "por que",
+      "porque",
+      "como funciona",
+      "quero entender",
+      "não entendi"
+    ],
+    reflection: [
+      "eu acho que",
+      "eu sinto que",
+      "me parece que",
+      "tenho pensado",
+      "fico pensando",
+      "não sei se",
+      "talvez",
+      "às vezes",
+      "as vezes"
+    ]
+  };
+
+  for (const [pattern, signals] of Object.entries(patterns)) {
+    if (signals.some((signal) => text.includes(signal))) {
+      return pattern;
+    }
+  }
+
+  return null;
+}
+
+function inferPattern({
   character,
   text,
   hasImage,
   hasAudio,
-  messageLength,
-  shortState
+  messageLength
 }) {
-  if (hasImage) return "image_analysis";
-  if (hasAudio) return "live_assistant";
+  if (hasImage) return "direct_answer";
+  if (hasAudio) return "direct_answer";
 
-  const combinedState = normalizeText(shortState);
-  const isQuestion =
-    text.includes("?") ||
-    text.startsWith("como") ||
-    text.startsWith("what") ||
-    text.startsWith("why") ||
-    text.startsWith("por que");
+  if (isGreeting(text)) return "greeting";
+  if (isShortReaction(text)) return "direct_answer";
 
-  const wantsVerdict =
-    text.includes("vale a pena") ||
-    text.includes("faz sentido") ||
-    text.includes("devo") ||
-    text.includes("should i") ||
-    text.includes("worth it");
+  const explicitPattern = detectPatternSignals(text);
+  if (explicitPattern) return explicitPattern;
 
-  const wantsTeaching =
-    text.includes("me explica") ||
-    text.includes("explique") ||
-    text.includes("explain") ||
-    text.includes("how does") ||
-    text.includes("como funciona");
+  if (character?.id === "nana") {
+    const cookingSignals = [
+      "frango",
+      "arroz",
+      "receita",
+      "molho",
+      "empanar",
+      "air fryer",
+      "cozinha",
+      "cozinhar",
+      "jantar",
+      "almoço",
+      "almoco"
+    ];
 
-  const playfulEntry =
-    messageLength <= 20 &&
-    (text.includes("oi") ||
-      text.includes("hey") ||
-      text.includes("fala") ||
-      text.includes("e aí") ||
-      text.includes("opa"));
-
-  const reflectionSignals =
-    text.includes("acho que") ||
-    text.includes("sinto que") ||
-    text.includes("tenho pensado") ||
-    text.includes("meaning") ||
-    text.includes("sentido") ||
-    messageLength > 420;
-
-  if (wantsVerdict) return "verdict_mode";
-  if (wantsTeaching) return "teaching_mode";
-  if (playfulEntry) return "playful_entry";
-  if (reflectionSignals) return "deep_reflection";
-
-  if (
-    character.id === "nana" &&
-    (combinedState.includes("cooking") ||
-      text.includes("ingrediente") ||
-      text.includes("frango") ||
-      text.includes("arroz") ||
-      text.includes("recipe") ||
-      text.includes("receita"))
-  ) {
-    return "live_assistant";
+    if (cookingSignals.some((signal) => text.includes(signal))) {
+      if (text.includes("como")) return "practical_guidance";
+      if (text.includes("caloria") || text.includes("kcal")) return "reassurance";
+      return "brief_explanation";
+    }
   }
 
-  if (
-    character.id === "jason" &&
-    (combinedState.includes("workout") ||
-      text.includes("treino") ||
-      text.includes("academia") ||
-      text.includes("série") ||
-      text.includes("exercise") ||
-      text.includes("gym"))
-  ) {
-    return "live_training";
+  if (character?.id === "jason") {
+    const trainingSignals = [
+      "treino",
+      "academia",
+      "supino",
+      "peso",
+      "cardio",
+      "proteína",
+      "proteina",
+      "kcal",
+      "série",
+      "serie",
+      "reps"
+    ];
+
+    if (trainingSignals.some((signal) => text.includes(signal))) {
+      if (text.includes("como")) return "practical_guidance";
+      if (
+        text.includes("está certo") ||
+        text.includes("tá certo") ||
+        text.includes("faz sentido") ||
+        text.includes("é normal")
+      ) {
+        return "reassurance";
+      }
+      return "brief_explanation";
+    }
   }
 
-  if (isQuestion && messageLength < 180) return "quick_question";
-  if (messageLength > 240) return "structured_explanation";
+  if (text.includes("?")) {
+    return "direct_answer";
+  }
 
-  return "live_assistant";
+  if (messageLength > 180) {
+    return "reflection";
+  }
+
+  return "brief_explanation";
 }
 
-function inferResponseDepth(character, interactionMode, messageLengthBucket) {
-  const preferred = character?.config?.preferredDepth || "short";
+function inferInteractionMode(pattern, hasImage) {
+  if (hasImage) return "image_analysis";
 
-  if (
-    interactionMode === "deep_reflection" ||
-    interactionMode === "teaching_mode" ||
-    interactionMode === "structured_explanation"
-  ) {
-    return preferred === "short" ? "medium" : preferred === "medium" ? "medium" : "deep";
+  const map = {
+    greeting: "playful_entry",
+    direct_answer: "quick_question",
+    brief_explanation: "structured_explanation",
+    reassurance: "verdict_mode",
+    practical_guidance: "live_assistant",
+    step_by_step_light: "teaching_mode",
+    opinion: "verdict_mode",
+    reflection: "deep_reflection"
+  };
+
+  return map[pattern] || "live_assistant";
+}
+
+function inferResponseDepth(character, pattern, messageLengthBucket, text) {
+  const preferred = character?.config?.preferredDepth || "medium";
+
+  const deepSignals = [
+    "passo a passo",
+    "me explica melhor",
+    "explica melhor",
+    "detalha",
+    "detalhado",
+    "mais a fundo",
+    "em detalhes",
+    "quero entender direito"
+  ];
+
+  const wantsDeep = deepSignals.some((signal) => text.includes(signal));
+
+  if (wantsDeep) return "deep";
+
+  if (pattern === "greeting") return "short";
+
+  if (pattern === "direct_answer") {
+    return messageLengthBucket === "ultra_short" || messageLengthBucket === "very_short"
+      ? "short"
+      : "medium";
   }
 
-  if (interactionMode === "quick_question" || interactionMode === "playful_entry") {
-    return "short";
+  if (pattern === "reassurance") {
+    return messageLengthBucket === "medium" || messageLengthBucket === "long"
+      ? "medium"
+      : "short";
   }
 
-  if (interactionMode === "verdict_mode") {
+  if (pattern === "practical_guidance") {
+    if (text.includes("passo a passo")) return "deep";
+    return "medium";
+  }
+
+  if (pattern === "reflection") {
+    if (messageLengthBucket === "long" || messageLengthBucket === "very_long") {
+      return "deep";
+    }
+    return preferred === "short" ? "medium" : preferred;
+  }
+
+  if (pattern === "opinion") {
+    return messageLengthBucket === "long" ? "medium" : "short";
+  }
+
+  if (pattern === "brief_explanation") {
+    if (messageLengthBucket === "long" || messageLengthBucket === "very_long") {
+      return preferred === "deep" ? "deep" : "medium";
+    }
     return preferred === "deep" ? "medium" : preferred;
   }
-
-  if (messageLengthBucket === "very_long") return "deep";
-  if (messageLengthBucket === "long") return preferred === "short" ? "medium" : preferred;
 
   return preferred;
 }
 
-function inferCompressionLevel(character, messageLengthBucket, interactionMode) {
+function inferCompressionLevel(character, messageLengthBucket, pattern) {
   const tolerance = character?.config?.compressionTolerance || "low";
 
-  if (interactionMode === "deep_reflection" || interactionMode === "teaching_mode") {
-    return tolerance === "high" ? "medium" : "low";
-  }
-
-  if (messageLengthBucket === "very_short") return "none";
-  if (messageLengthBucket === "short") return "low";
-  if (messageLengthBucket === "medium") return "low";
+  if (pattern === "greeting") return "none";
+  if (pattern === "direct_answer" && messageLengthBucket === "ultra_short") return "none";
+  if (pattern === "direct_answer" && messageLengthBucket === "very_short") return "low";
+  if (pattern === "reflection") return tolerance === "high" ? "medium" : "low";
+  if (messageLengthBucket === "very_long") return tolerance === "high" ? "high" : "medium";
   if (messageLengthBucket === "long") return tolerance === "high" ? "medium" : "low";
-  return tolerance === "high" ? "high" : "medium";
+
+  return "low";
 }
 
-function inferHistoryUsage(character, interactionMode, historyLength) {
+function inferHistoryUsage(character, pattern, historyLength) {
   const baseline = Number(character?.config?.typicalHistoryUsage || 4);
 
   if (historyLength <= 0) {
-    return { useRecentHistory: false, recentHistoryLimit: 0 };
+    return {
+      useRecentHistory: false,
+      recentHistoryLimit: 0
+    };
   }
 
-  if (interactionMode === "quick_question" || interactionMode === "playful_entry") {
+  if (pattern === "greeting" || pattern === "direct_answer") {
     return {
       useRecentHistory: true,
       recentHistoryLimit: Math.min(2, historyLength)
     };
   }
 
-  if (
-    interactionMode === "deep_reflection" ||
-    interactionMode === "verdict_mode" ||
-    interactionMode === "teaching_mode"
-  ) {
+  if (pattern === "reflection" || pattern === "opinion") {
     return {
       useRecentHistory: true,
       recentHistoryLimit: Math.min(Math.max(baseline, 6), historyLength)
@@ -196,36 +355,33 @@ function inferHistoryUsage(character, interactionMode, historyLength) {
   };
 }
 
-function inferMemoryUsage(interactionMode, domainStatus) {
+function inferMemoryUsage(pattern, domainStatus) {
   if (domainStatus === "hard_drift") {
     return { short: true, mid: false, long: false };
   }
 
-  if (interactionMode === "quick_question" || interactionMode === "playful_entry") {
+  if (pattern === "greeting" || pattern === "direct_answer") {
     return { short: true, mid: false, long: true };
   }
 
-  if (
-    interactionMode === "deep_reflection" ||
-    interactionMode === "verdict_mode" ||
-    interactionMode === "teaching_mode"
-  ) {
+  if (pattern === "reflection" || pattern === "opinion") {
     return { short: true, mid: true, long: true };
   }
 
   return { short: true, mid: true, long: true };
 }
 
-function inferOutputTokenLimit(responseDepth, interactionMode) {
-  if (interactionMode === "playful_entry") return 40;
-  if (interactionMode === "quick_question") return responseDepth === "short" ? 80 : 120;
-  if (interactionMode === "verdict_mode") return 120;
-  if (interactionMode === "teaching_mode") return responseDepth === "deep" ? 220 : 160;
-  if (interactionMode === "deep_reflection") return responseDepth === "deep" ? 260 : 180;
+function inferOutputTokenLimit(pattern, responseDepth) {
+  if (pattern === "greeting") return 120;
+  if (pattern === "direct_answer") return responseDepth === "short" ? 140 : 220;
+  if (pattern === "reassurance") return responseDepth === "short" ? 220 : 280;
+  if (pattern === "practical_guidance") return responseDepth === "deep" ? 500 : 320;
+  if (pattern === "step_by_step_light") return 380;
+  if (pattern === "opinion") return responseDepth === "deep" ? 320 : 220;
+  if (pattern === "reflection") return responseDepth === "deep" ? 550 : 320;
+  if (pattern === "brief_explanation") return responseDepth === "deep" ? 420 : 260;
 
-  if (responseDepth === "short") return 100;
-  if (responseDepth === "medium") return 180;
-  return 260;
+  return 220;
 }
 
 function inferDomainStatus(character, text) {
@@ -233,6 +389,7 @@ function inferDomainStatus(character, text) {
 
   if (hits >= 2) return "in_domain";
   if (hits === 1) return "soft_drift";
+  if (text.length <= 20) return "soft_drift";
 
   return "hard_drift";
 }
@@ -242,36 +399,48 @@ function inferRedirectCharacter(characterId, text, domainStatus) {
 
   const signals = [
     {
-      match: ["business", "startup", "pricing", "cac", "mrr", "saas", "empresa"],
+      match: ["business", "startup", "pricing", "cac", "mrr", "saas", "empresa", "negócio", "negocio", "produto"],
       redirect: "Gordon"
     },
     {
-      match: ["filosofia", "história", "meaning", "sociedade", "historia", "ethics"],
+      match: ["filosofia", "história", "historia", "meaning", "sociedade", "ethics", "império", "imperio", "política", "politica"],
       redirect: "Arthur"
     },
     {
-      match: ["dinheiro", "investimento", "budget", "finance", "salário", "salary"],
+      match: ["dinheiro", "investimento", "budget", "finance", "salário", "salario", "salary", "renda", "gasto", "dívida", "divida"],
       redirect: "Walter"
     },
     {
-      match: ["academia", "treino", "gym", "cardio", "muscle", "peso"],
+      match: ["academia", "treino", "gym", "cardio", "muscle", "peso", "proteína", "proteina", "kcal"],
       redirect: "Jason"
     },
     {
-      match: ["comida", "receita", "cozinhar", "ingredient", "meal", "kitchen"],
+      match: ["comida", "receita", "cozinhar", "ingredient", "meal", "kitchen", "frango", "molho", "air fryer"],
       redirect: "Nana"
     },
     {
-      match: ["namoro", "crush", "relationship", "date", "flert", "ciúme", "love"],
+      match: ["namoro", "crush", "relationship", "date", "flert", "ciúme", "ciume", "love", "relacionamento"],
       redirect: "Cupido"
     },
     {
-      match: ["fashion", "roupa", "look", "estilo", "visual"],
+      match: ["fashion", "roupa", "look", "estilo", "visual", "cabelo", "barba", "perfume"],
       redirect: "Oscar"
     },
     {
-      match: ["science", "technical", "bug", "engine", "physics", "código técnico"],
+      match: ["science", "technical", "bug", "engine", "physics", "código técnico", "celular", "internet", "computador", "ciência", "ciencia"],
       redirect: "Ion9"
+    },
+    {
+      match: ["filme", "série", "serie", "jogo", "música", "musica", "celebridade", "cultura pop"],
+      redirect: "Lisa"
+    },
+    {
+      match: ["notícia", "noticia", "presidente", "guerra", "eleição", "eleicao", "geopolítica", "geopolitica", "mundo"],
+      redirect: "Sara"
+    },
+    {
+      match: ["matemática", "matematica", "gramática", "gramatica", "estudar", "prova", "exercício", "exercicio", "escola"],
+      redirect: "Agnes"
     }
   ];
 
@@ -312,41 +481,51 @@ export function classifyMessage({
   const messageLengthBucket = getMessageLengthBucket(messageLength);
 
   const temporalFlags = inferTemporalFlags(timestamp, shortState);
-
   const domainStatus = inferDomainStatus(character, text);
-  const interactionMode = inferInteractionMode({
+
+  const pattern = inferPattern({
     character,
     text,
     hasImage,
     hasAudio,
-    messageLength,
-    shortState
+    messageLength
   });
+
+  const interactionMode = inferInteractionMode(pattern, hasImage);
+
   const responseDepth = inferResponseDepth(
     character,
-    interactionMode,
-    messageLengthBucket
+    pattern,
+    messageLengthBucket,
+    text
   );
+
   const inputCompression = inferCompressionLevel(
     character,
     messageLengthBucket,
-    interactionMode
+    pattern
   );
-  const historyUsage = inferHistoryUsage(character, interactionMode, historyLength);
-  const memoryUsage = inferMemoryUsage(interactionMode, domainStatus);
+
+  const historyUsage = inferHistoryUsage(character, pattern, historyLength);
+
+  const memoryUsage = inferMemoryUsage(pattern, domainStatus);
+
   const redirectCharacter = inferRedirectCharacter(
     character.id,
     text,
     domainStatus
   );
+
   const imageMode = hasImage ? inferImageMode(character.id) : null;
+
   const outputTokenLimit = inferOutputTokenLimit(
-    responseDepth,
-    interactionMode
+    pattern,
+    responseDepth
   );
 
   return {
     interactionMode,
+    pattern,
     responseDepth,
     inputCompression,
     useRecentHistory: historyUsage.useRecentHistory,
@@ -360,7 +539,9 @@ export function classifyMessage({
       timestamp,
       messageLength,
       messageLengthBucket,
-      temporalFlags
+      temporalFlags,
+      hasAudio,
+      shortState
     }
   };
 }
