@@ -20,6 +20,8 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+const MODEL_NAME = "gpt-5-mini";
+
 app.get("/", (req, res) => {
   res.send("Migoo API running");
 });
@@ -38,7 +40,8 @@ app.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "message is required" });
     }
 
-    const character = characters[persona] || characters.nana;
+    const normalizedPersona = String(persona || "nana").trim().toLowerCase();
+    const character = characters[normalizedPersona] || characters.nana;
 
     const classifierOutput = classifyMessage({
       character,
@@ -74,19 +77,15 @@ app.post("/chat", async (req, res) => {
     const input = buildResponsesInput(messages);
 
     const response = await openai.responses.create({
-      model: "gpt-5-mini",
+      model: MODEL_NAME,
       instructions,
       input,
-      max_output_tokens: Math.max(1500, classifierOutput.outputTokenLimit)
-    }); 
-    
-console.log("RAW RESPONSE:", JSON.stringify(response, null, 2));
-    
-    const reply =
-  response?.output_text?.trim?.() ||
-  response?.output?.[0]?.content?.[0]?.text?.trim?.() ||
-  response?.output?.[0]?.content?.[0]?.output_text?.trim?.() ||
-  "No response.";
+      max_output_tokens: Math.max(600, classifierOutput.outputTokenLimit)
+    });
+
+    console.log("RAW RESPONSE:", JSON.stringify(response, null, 2));
+
+    const reply = extractTextFromResponse(response) || "No response.";
 
     updateMemoryAfterResponse({
       userId,
@@ -100,10 +99,12 @@ console.log("RAW RESPONSE:", JSON.stringify(response, null, 2));
       reply,
       meta: {
         persona: character.id,
+        pattern: classifierOutput.pattern,
         interactionMode: classifierOutput.interactionMode,
         responseDepth: classifierOutput.responseDepth,
         domainStatus: classifierOutput.domainStatus,
-        redirectCharacter: classifierOutput.redirectCharacter
+        redirectCharacter: classifierOutput.redirectCharacter,
+        outputTokenLimit: classifierOutput.outputTokenLimit
       }
     });
   } catch (err) {
@@ -152,7 +153,6 @@ function extractTextFromResponse(response) {
   }
 
   const output = Array.isArray(response?.output) ? response.output : [];
-
   const parts = [];
 
   for (const item of output) {
@@ -162,6 +162,10 @@ function extractTextFromResponse(response) {
 
     for (const piece of content) {
       if (piece?.type === "output_text" && typeof piece?.text === "string") {
+        parts.push(piece.text);
+      }
+
+      if (typeof piece?.text === "string" && piece.text.trim()) {
         parts.push(piece.text);
       }
     }
